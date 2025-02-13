@@ -1,0 +1,2 @@
+# fastpanel-ipv6
+ 
