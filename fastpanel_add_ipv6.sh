@@ -3,7 +3,8 @@
 SCRIPT_PATH="/usr/local/bin/fastpanel_add_ipv6.sh"
 CRON_JOB="*/15 * * * * /usr/local/bin/fastpanel_add_ipv6.sh > /var/log/fastpanel_ipv6.log 2>&1"
 
-echo "🔄 Создаём скрипт для добавления IPv6 и отключения Nginx для статики..."
+echo "🔄 Создаём или обновляем скрипт для добавления IPv6 и отключения Nginx для статики..."
+
 cat <<EOF > $SCRIPT_PATH
 #!/bin/bash
 
@@ -41,7 +42,7 @@ sqlite3 "\$DB_PATH" "DELETE FROM ips WHERE ip LIKE '%:%';"
 # Добавляем IPv6 только если его ещё нет
 sqlite3 "\$DB_PATH" "
 INSERT INTO ips (id, ip, virtualhost_id)
-SELECT (SELECT MAX(id) FROM ips) + ROW_NUMBER() OVER (), '\$IPV6', id 
+SELECT (SELECT COALESCE(MAX(id), 0) FROM ips) + ROW_NUMBER() OVER (), '\$IPV6', id 
 FROM site WHERE id NOT IN (SELECT virtualhost_id FROM ips WHERE ip LIKE '%:%');
 "
 
@@ -94,16 +95,27 @@ fi
 # 🔄 Отключаем Nginx для статических файлов
 echo "🔄 Отключаем Nginx для статических файлов на всех сайтах..."
 sqlite3 "\$DB_PATH" "UPDATE site SET static_file_handler = 0;"
-echo "✅ Nginx для статических файлов отключен для всех сайтов."
 
-# Перезапускаем FastPanel
+# 🔍 Проверяем, отключился ли Nginx для статики
+echo "🔄 Проверяем, отключился ли Nginx для статики..."
+sqlite3 "\$DB_PATH" "
+SELECT domain, static_file_handler FROM site WHERE static_file_handler = 1;
+"
+
+# 🧹 Очистка кеша FastPanel (если FastPanel кеширует данные)
+echo "🔄 Очищаем кеш FastPanel..."
+rm -rf /usr/local/fastpanel2/runtime/cache/*
+rm -rf /usr/local/fastpanel2/runtime/proxies/*
+
+# 🔄 Перезапускаем FastPanel
 echo "🔄 Перезапускаем FastPanel..."
 systemctl restart fastpanel2
 echo "✅ FastPanel успешно перезапущен!"
 
+# 🎉 Готово! Все сайты работают через PHP.
 echo "🎉 Готово! Все сайты работают через PHP."
 
-# Ограничиваем лог до 200 строк
+# 🔄 Ограничиваем лог до 200 строк
 LOG_FILE="/var/log/fastpanel_ipv6.log"
 echo "🔄 Ограничиваем лог до 200 строк..."
 tail -n 200 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
@@ -111,7 +123,7 @@ tail -n 200 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
 echo "✅ Очистка логов завершена."
 EOF
 
-echo "✅ Скрипт создан: $SCRIPT_PATH"
+echo "✅ Скрипт обновлён: $SCRIPT_PATH"
 
 # Делаем скрипт исполняемым
 chmod +x $SCRIPT_PATH
@@ -127,4 +139,3 @@ echo "🔄 Проверяем крон..."
 crontab -l | grep fastpanel_add_ipv6.sh
 
 echo "🎉 Установка завершена!"
-
