@@ -5,7 +5,7 @@ CRON_JOB="*/15 * * * * /usr/local/bin/fastpanel_add_ipv6.sh > /var/log/fastpanel
 
 echo "🔄 Создаём или обновляем скрипт для добавления IPv6 и отключения Nginx для статики..."
 
-cat <<EOF > $SCRIPT_PATH
+cat <<EOF > \$SCRIPT_PATH
 #!/bin/bash
 
 # Определяем текущий IPv4 и IPv6 сервера
@@ -48,6 +48,23 @@ FROM site WHERE id NOT IN (SELECT virtualhost_id FROM ips WHERE ip LIKE '%:%');
 
 echo "✅ IPv6-адреса успешно добавлены в FastPanel 2."
 
+# Добавление недостающей записи в site_settings
+EXISTS=\$(sqlite3 "\$DB_PATH" "SELECT COUNT(*) FROM site_settings WHERE id = 155;")
+if [[ "\$EXISTS" -eq 0 ]]; then
+    sqlite3 "\$DB_PATH" "INSERT INTO site_settings (id, param1, param2, param3, param4, param5, param6, param7) VALUES (155, 0, 0, '', 0, 0, 0, 0);"
+    echo "✅ Добавлена запись в site_settings (id = 155)."
+else
+    echo "⚠️ Запись в site_settings (id = 155) уже существует."
+fi
+
+# Добавление события в queue_event
+UUID=\$(uuidgen)
+sqlite3 "\$DB_PATH" "
+INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at) 
+VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'example.com', '\$UUID', 'virtualhost.job', 'VIRTUALHOST', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
+"
+echo "✅ Событие добавлено в queue_event!"
+
 # Определяем директории конфигураций Nginx
 NGINX_DIRS=(
     "/etc/nginx/fastpanel2-available"
@@ -81,61 +98,26 @@ done
 
 echo "✅ IPv6 успешно добавлен в конфигурации Nginx."
 
-# Проверяем конфигурацию перед перезапуском
-echo "🔄 Проверяем конфигурацию Nginx..."
+# Перезапускаем сервисы
 if nginx -t; then
     echo "✅ Конфигурация Nginx корректна, перезапускаем..."
     systemctl restart fastpanel2
     systemctl restart nginx
-    echo "✅ Настройка завершена. IPv4 + IPv6 теперь активны для всех сайтов в FastPanel."
 else
     echo "❌ Ошибка в конфигурации Nginx! Проверьте ошибки перед перезапуском."
 fi
 
-# 🔄 Отключаем Nginx для статических файлов
-echo "🔄 Отключаем Nginx для статических файлов на всех сайтах..."
+echo "🔄 Отключаем Nginx для статики..."
 sqlite3 "\$DB_PATH" "UPDATE site SET static_file_handler = 0;"
+echo "✅ FastPanel успешно настроен!"
 
-# 🔍 Проверяем, отключился ли Nginx для статики
-echo "🔄 Проверяем, отключился ли Nginx для статики..."
-sqlite3 "\$DB_PATH" "
-SELECT domain, static_file_handler FROM site WHERE static_file_handler = 1;
-"
-
-# 🧹 Очистка кеша FastPanel (если FastPanel кеширует данные)
-echo "🔄 Очищаем кеш FastPanel..."
-rm -rf /usr/local/fastpanel2/runtime/cache/*
-rm -rf /usr/local/fastpanel2/runtime/proxies/*
-
-# 🔄 Перезапускаем FastPanel
-echo "🔄 Перезапускаем FastPanel..."
-systemctl restart fastpanel2
-echo "✅ FastPanel успешно перезапущен!"
-
-# 🎉 Готово! Все сайты работают через PHP.
-echo "🎉 Готово! Все сайты работают через PHP."
-
-# 🔄 Ограничиваем лог до 200 строк
-LOG_FILE="/var/log/fastpanel_ipv6.log"
 echo "🔄 Ограничиваем лог до 200 строк..."
+LOG_FILE="/var/log/fastpanel_ipv6.log"
 tail -n 200 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
-
 echo "✅ Очистка логов завершена."
 EOF
 
-echo "✅ Скрипт обновлён: $SCRIPT_PATH"
+chmod +x \$SCRIPT_PATH
+(crontab -l 2>/dev/null | grep -F "\$SCRIPT_PATH" || echo "\$CRON_JOB") | crontab -
 
-# Делаем скрипт исполняемым
-chmod +x $SCRIPT_PATH
-echo "✅ Выданы права на выполнение"
-
-# Добавляем скрипт в cron (если его ещё нет)
-(crontab -l 2>/dev/null | grep -F "$SCRIPT_PATH" || echo "$CRON_JOB") | crontab -
-
-echo "✅ Скрипт добавлен в cron: каждые 15 минут"
-
-# Проверяем, записался ли он
-echo "🔄 Проверяем крон..."
-crontab -l | grep fastpanel_add_ipv6.sh
-
-echo "🎉 Установка завершена!"
+echo "✅ Установка завершена!"
