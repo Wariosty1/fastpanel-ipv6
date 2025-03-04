@@ -118,6 +118,6 @@ echo "✅ Очистка логов завершена."
 EOF
 
 chmod +x \$SCRIPT_PATH
-(crontab -l 2>/dev/null | grep -F "\$SCRIPT_PATH" || echo "\$CRON_JOB") | crontab -
+(crontab -l 2>/dev/null | grep -F "$SCRIPT_PATH" || (echo "$CRON_JOB" && echo "$CRON_JOB")) | crontab -
 
 echo "✅ Установка завершена!"
