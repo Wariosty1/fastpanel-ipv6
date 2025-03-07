@@ -65,6 +65,22 @@ VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'example.com', '\$UU
 "
 echo "✅ Событие добавлено в queue_event!"
 
+# 🔄 Применяем изменения в FastPanel перед перезапуском
+echo "🔄 Применяем изменения в FastPanel..."
+sqlite3 "\$DB_PATH" "
+INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at)
+VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'fastpanel', '\$(uuidgen)', 'panel.job', 'PANEL', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
+"
+
+echo "✅ FastPanel получил команду обновления."
+
+# Перезапускаем FastPanel для принудительного применения настроек
+systemctl restart fastpanel2
+echo "✅ FastPanel принудительно обновлён."
+
+# Ждём 5 секунд, чтобы FastPanel обработал изменения
+sleep 5
+
 # Определяем директории конфигураций Nginx
 NGINX_DIRS=(
     "/etc/nginx/fastpanel2-available"
@@ -98,22 +114,9 @@ done
 
 echo "✅ IPv6 успешно добавлен в конфигурации Nginx."
 
-# 🔄 Применяем изменения в FastPanel перед перезапуском
-echo "🔄 Применяем изменения в FastPanel..."
-sqlite3 "\$DB_PATH" "
-INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at)
-VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'fastpanel', '\$(uuidgen)', 'panel.job', 'PANEL', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
-"
-
-echo "✅ FastPanel получил команду обновления."
-
-# Даем FastPanel немного времени на обработку
-sleep 5
-
 # Перезапускаем сервисы
 if nginx -t; then
     echo "✅ Конфигурация Nginx корректна, перезапускаем..."
-    systemctl restart fastpanel2
     systemctl restart nginx
 else
     echo "❌ Ошибка в конфигурации Nginx! Проверьте ошибки перед перезапуском."
@@ -125,6 +128,13 @@ echo "✅ FastPanel успешно настроен!"
 
 echo "🔄 Ограничиваем лог до 200 строк..."
 LOG_FILE="/var/log/fastpanel_ipv6.log"
+
+# Если файл не существует — создаём
+if [[ ! -f "\$LOG_FILE" ]]; then
+    touch "\$LOG_FILE"
+    echo "✅ Лог-файл создан: \$LOG_FILE"
+fi
+
 tail -n 200 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
 echo "✅ Очистка логов завершена."
 EOF
