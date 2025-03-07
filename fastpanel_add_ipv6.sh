@@ -48,33 +48,23 @@ FROM site WHERE id NOT IN (SELECT virtualhost_id FROM ips WHERE ip LIKE '%:%');
 
 echo "✅ IPv6-адреса успешно добавлены в FastPanel 2."
 
-# Добавление недостающей записи в site_settings
-EXISTS=\$(sqlite3 "\$DB_PATH" "SELECT COUNT(*) FROM site_settings WHERE id = 155;")
-if [[ "\$EXISTS" -eq 0 ]]; then
-    sqlite3 "\$DB_PATH" "INSERT INTO site_settings (id, param1, param2, param3, param4, param5, param6, param7) VALUES (155, 0, 0, '', 0, 0, 0, 0);"
-    echo "✅ Добавлена запись в site_settings (id = 155)."
-else
-    echo "⚠️ Запись в site_settings (id = 155) уже существует."
-fi
+# Получаем список сайтов (virtualhost_id), у которых добавлен IPv6
+SITES=\$(sqlite3 "\$DB_PATH" "SELECT DISTINCT virtualhost_id FROM ips WHERE ip LIKE '%:%';")
 
-# Добавление события в queue_event
-UUID=\$(uuidgen)
-sqlite3 "\$DB_PATH" "
-INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at) 
-VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'example.com', '\$UUID', 'virtualhost.job', 'VIRTUALHOST', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
-"
-echo "✅ Событие добавлено в queue_event!"
+# Применяем изменения для каждого сайта
+for SITE_ID in \$SITES; do
+    echo "🔄 Применяем изменения для сайта ID: \$SITE_ID"
 
-# 🔄 Применяем изменения в FastPanel перед перезапуском
-echo "🔄 Применяем изменения в FastPanel..."
-sqlite3 "\$DB_PATH" "
-INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at)
-VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), 'fastpanel', '\$(uuidgen)', 'panel.job', 'PANEL', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
-"
+    UUID=\$(uuidgen)
+    sqlite3 "\$DB_PATH" "
+    INSERT INTO queue_event (id, domain, uuid, type, category, action, priority, user, user_class, user_id, status, created_by, ip, details, created_at, updated_at) 
+    VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM queue_event), (SELECT domain FROM site WHERE id = \$SITE_ID), '\$UUID', 'virtualhost.job', 'VIRTUALHOST', 'UPDATING', 1, 'fastuser', 'FVPS\\UserBundle\\Entity\\FpUser', 1, 'SUCCESS', 78, '\$IPV4', '', datetime('now'), datetime('now'));
+    "
 
-echo "✅ FastPanel получил команду обновления."
+    echo "✅ Изменения добавлены в очередь для сайта ID: \$SITE_ID"
+done
 
-# Перезапускаем FastPanel для принудительного применения настроек
+echo "🔄 Принудительно обновляем FastPanel..."
 systemctl restart fastpanel2
 echo "✅ FastPanel принудительно обновлён."
 
